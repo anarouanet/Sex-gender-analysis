@@ -2,8 +2,9 @@
 ## MELODEM 
 ## September 9th, 2020 
 ## Anaïs Rouanet and Cécile Proust-Lima
+
 rm(list=ls())
-setwd("/Users/anais/Documents/2019 Postdoc Bordeaux/Melodem_papier/Analyses on cohorts/Paquid")
+setwd("./Path/")
 
 #### 1. Libraries required #####
 ## please install the packages if needed
@@ -22,84 +23,85 @@ library(splines)
 # data = dataframe with the sample
 #
 # age0C = age at baseline minus 75 in decades
+# age0 = age at baseline in years
+# age = age in years
 # PE = practice effect ie indicator that the visit is the first one
-# male = indicator for male
+# male = indicator for male (sex/gender)
 # EL = binary education level with low=0 and high=1
 # time = delay in the study in decades (current time - time of entry of the participant)
 # varY = outcome
 # ID = Identifier of the participant - should be numeric to avoid any problems with packages
-# prevalent = indicator of prevalent dementia at inclusion
 # timeEvent = time to first event between death, dropout or observed at the end of the study
 #             indicated in decades
 #             a person who dies more than 3 years after the last visit is considered to have dropped out at the last visit
 #             (dementia is considered as dropout)
-# indEvent = status indicator at the end of the study, which equals 2 if death; 1 if dropout; 0 if observed 
+# indEvent = status indicator at the end of the study, which equals 2 if death; 1 if dropout; 0 if still in the cohort at the end of the follow up 
 # prevalent = indicator for prevalent dementia at baseline
+# dementia = indicator for incident dementia during the follow up
+# agedem = age at dementia diagnosis in years
 # visit = indicator of visits (1 2 3 ...)
 # timeDeath = visit corresponding to time to death
+# agedeath = age at death in years (NA if alive)
+# ageend = age in years at the end of the study follow-up (NA is dropped out or dead before) i.e at last planned visit (max(visit))
+# lastVisitAge = age at the last observed visit in years
 
 
 
 #### For instance in paquid: 
 # a. loading of the dataset (longitudinal format) without any selection
-load("/Users/anais/Documents/2019 Postdoc Bordeaux/Melodem_papier/scripts/PAQUID_MELODEM.RData")
+load("PAQUID_MELODEM.RData")
 data <- paq
 
 # specify the name of the dataset for outputs: 
-dataset <- "paquid"
+dataset <- "Paquid"
 # specify the name of the outcome for outputs:  
-outcome <- "fruits"
+outcome <- "Verbal Fluency"
 
 # creation of the variables
-data$age0C <- (data$age0 - 75)/10 # at baseline
-data$PE <- as.numeric(data$suivi==0) 
-data$male <- as.numeric(data$sexe==1)
-data$EL <- as.factor(data$certif)
+data$age0C <- (data$age0 - 75)/10 
+data$PE <- as.numeric(data$visit==1) 
+data$EL <- as.factor(data$EL)
 data$time <- (data$age - data$age0)/10
 data$varY <- data$ani_15
-data$varY <- data$fru_15
-data$ID <- data$numero
-data$prevalent <- data$demence
-data$visit <- data$suivi
+
 theoretical_visits <- unique(data$visit)[order(unique(data$visit))]
 # make sure the visit indexes are in consecutive order, otherwise:
-data$visit <- sapply(data$suivi, function(x) which(theoretical_visits==x))
+data$visit <- sapply(data$visit, function(x) which(theoretical_visits==x))
 table(data$visit)
 
-data$timeDeath <- sapply((data$agedc-data$age0), function(x) ifelse(!is.na(x),
-                                                                    ifelse(x<=max(theoretical_visits),min(which(theoretical_visits>=x)),
-                                                                           length(theoretical_visits)+1),NA))
+data$timeDeath <- sapply((data$agedeath-data$age0), function(x) ifelse(!is.na(x),
+                                                                       ifelse(x<=max(theoretical_visits),min(which(theoretical_visits>=x)),
+                                                                              length(theoretical_visits)+1),NA))
 
-# for timeEvent, this is somewhat more complex
+# Definition of timeEvent
 # initialization
 data$indEvent <- -1
 data$ageEvent <- -1
-# age of event receives age of death for those who died (ind = 2)
-data$ageEvent[!is.na(data$agedc)] <- paq$agedc[!is.na(data$agedc)]
-data$indEvent[!is.na(data$agedc)] <- 2
-# age of event receives the last visit observed for those not dropped out (ind = 0)
-data$ageEvent[!is.na(data$ageviv25)] <- data$ageviv25[!is.na(data$ageviv25)]
-data$indEvent[!is.na(paq$ageviv25)] <- 0
-# age of event receives: min between dementia diagnosis and dropout 
-# Careful: dead after 3 years -ie planned visit in paquid- are considered as dropped out
-# I add 0.1 to avoid any problem of dropout concomittant with an observed visit
-data$inddropout <- ((data$agefin25 > data$lastage+3)|data$dem1_25==1)
+# age of event is age of death for those who died (ind = 2)
+data$ageEvent[!is.na(data$agedeath)] <- data$agedeath[!is.na(data$agedeath)]
+data$indEvent[!is.na(data$agedeath)] <- 2
+# age of event is the last visit observed for those not dropped out (ind = 0)
+data$ageEvent[!is.na(data$ageend)] <- data$ageend[!is.na(data$ageend)]
+data$indEvent[!is.na(data$ageend)] <- 0
+# age of event is: min between dementia diagnosis and dropout 
+# Careful: participants who die more than 3 years after their last visit are considered as dropped out
+# For participants who drop out, add 0.1 to ageEvent to avoid any problem of dropout time concomittant with an observed timepoint
+data$inddropout <- ((data$agedeath > data$lastVisitAge+3)| data$dementia==1 | is.na(data$ageend))
 data$indEvent[which(data$inddropout==1)] <- 1
-data$ageEvent[which(data$inddropout==1)] <- data$lastage[which(data$inddropout==1)]+0.1
-data$ageEvent[which(data$dem1_25==1)] <- data$agedem25[which(data$dem1_25==1)]+0.1
+data$ageEvent[which(data$inddropout==1)] <- data$lastVisitAge[which(data$inddropout==1)]+0.1
+data$ageEvent[which(data$dementia==1)] <- data$agedem[which(data$dementia==1)]
 
 # time to Event from age of event in decades
 data$timeEvent <- (data$ageEvent -data$age0)/10
-
-
+data <- data[order(data$numero, data$age),]
 
 
 #### 3. Selection of the population #######
 
-# those >=65 years old
+# Participants >=65 years old
 # with varY observed at baseline
 # not demented at baseline
-# no missing values for gender, education and age at baseline
+# no missing values for sex/gender, education and age at baseline
 
 # To do so I select the data at baseline in data0 and select the ID to include in ID
 data0 <- data[data$time==0,]
@@ -213,7 +215,7 @@ DquadHLME <- hlme( varY ~ time + I(time^2) + PE + age0C
                    + EL*(time + I(time^2)),
                    random=~ time + I(time^2) , subject= "ID", 
                    data = dataJM)
-sumTabHLME <- summary(DquadHLME)
+summary(DquadHLME)
 WaldMult(DquadHLME,pos=c(8,9))
 
 
@@ -230,14 +232,11 @@ DsplHLME <- hlme( varY ~ Z1 + Z2 + Z3 + PE + age0C
                   random=~ (Z1 + Z2 + Z3) , subject= "ID", 
                   data = dataJM)
 
+summary(DsplHLME)
 DsplHLME$loglik
-sumTabHLME <- summary(DsplHLME)
 
 plot(DsplHLME,which="fit",var.time="time")
 
-
-DsplHLME$AIC
-DquadHLME$AIC
 
 ############### GEE MODEL WITH GEEM #################
 
@@ -261,12 +260,13 @@ summary(DsplGEE)
 ############### weighted GEE MODEL WITH GEEM #################
 
 # Computation of the weights with monotone missing data
-# weights_noIMD <- weightsMMD(data=dataJM,Y="varY",X1="male", X2=c("age0C","educ1"),
+# weights_noIMD <- weightsMMD(data=dataJM,Y="varY",X1="male", X2=c("age0C","EL"),
 #                             subject="ID", death="timeDeath", time="visit", 
 #                             interval.death = 0, name= "weights_noIMD")$data
 # weights_noIMD <- weights_noIMD[order(weights_noIMD$ID,weights_noIMD$visit),]
+
 ### GEE with no intermittent missing data
-# AquadWGEE_noIMD <- geem(ISA_15_trunc~ time + I(time^2)  + PE + age0C   
+# AquadWGEE_noIMD <- geem(varY~ time + I(time^2)  + PE + age0C   
 #                         + male*(time + I(time^2))
 #                         + EL*(time + I(time^2)), id="ID" ,data = weights_noIMD, family=gaussian, 
 #                         corstr="independence", weights= "weights_noIMD",
@@ -301,11 +301,12 @@ save(DquadGEE, JM_D_both, JM_D_level, DquadHLME, DsplHLME, DquadLME, DquadwGEE, 
 
 # later, you can load those objects (and so not have to rerun them)
 # by using for instance:
-# load("/Users/anais/Documents/2019 Postdoc Bordeaux/Melodem_papier/Analyses on cohorts/Paquid/models_JM_LMM_GEE_wGEE_paquid_animals.RData")
+data_file <- paste("models_JM_LMM_GEE_wGEE_",dataset,"_",outcome,".RData",sep="")
+load(data_file)
 
 dataset <- "Paquid"
-outcome <- "Verbal Fluency- Fruits"
-library(geeM)
+outcome <- "Verbal Fluency"
+
 summary(DquadGEE)
 summary(DquadwGEE)
 summary(JM_D_both)
@@ -381,7 +382,7 @@ pdf(file=paste("pred_",dataset,"_",outcome,".pdf",sep=""),height = 5,width=7)
 # limits for Y by default
 ylim1 <- c(min(dataJM$varY),max(dataJM$varY))
 # change the limits for Y axis for better contrast of the curves
-ylim1 <- c(2,8)
+#ylim1 <- c(2,8)
 # change the limits for Y axis for better contrast of the curves
 xlim <- c(min(dataJM$time,na.rm=T),max(dataJM$time,na.rm=T))
 
@@ -460,19 +461,16 @@ dev.off()
 ### Comparison of Gender estimates across methods ---- 
 summary(dataJM$time)
 maxtime <- max(dataJM$time)
-#maxtime <- 0.5
 
 times_pred  <- c(0, 5, 9, 15)/10
-#times_pred  <- c(0, 5, 15,20)/10
 times_pred<-times_pred[which(times_pred<=maxtime)]
 diff_gender <- data.frame("time"=rep(times_pred,each=4), "estim"=rep(0,length(times_pred)*4),"se"=rep(0,length(times_pred)*4),
-                          "method"=rep(c("LME","JM","GEE","WGEE"),times=length(times_pred)))
+                          "method"=rep(c("LMM","JM","GEE","WGEE"),times=length(times_pred)))
 
-diff_gender$method <- factor(diff_gender$method, levels = c("JM", "LME", "WGEE", "GEE"))
+diff_gender$method <- factor(diff_gender$method, levels = c("JM", "LMM", "WGEE", "GEE"))
 
 ###computation sd LME
 n_param <- 11
-#ind_se  <- sapply(1:n_param, function(x) sum(1:x)) 
 LME_V                              <- matrix(0, length(DquadHLME$best), length(DquadHLME$best))
 LME_V[upper.tri(LME_V, diag=TRUE)] <- DquadHLME$V
 var_LME                            <- diag(LME_V)[c(6,8:9)] 
@@ -485,10 +483,10 @@ cov_JM                            <- c(JM_V[6,8], JM_V[6,9], JM_V[8,9])
 
 for(t in times_pred){
   #Linear mixed model
-  diff_gender$estim[diff_gender$time==t & diff_gender$method=='LME'] <-
+  diff_gender$estim[diff_gender$time==t & diff_gender$method=='LMM'] <-
     DquadHLME$best[c("male","time:male","I(time^2):male")]%*%c(1,t,t^2)
   
-  diff_gender$se[diff_gender$time==t & diff_gender$method=='LME']    <-
+  diff_gender$se[diff_gender$time==t & diff_gender$method=='LMM']    <-
     sqrt(var_LME[1] + var_LME[2]*t^2 + var_LME[3]*(t^2)^2 +
            2*(cov_LME[1]*t + cov_LME[2]*t^2 + cov_LME[3]*t^3))
   
@@ -516,45 +514,11 @@ for(t in times_pred){
     sqrt(DquadwGEE$var[6,6] + DquadwGEE$var[8,8]*t^2 + DquadwGEE$var[9,9]*(t^2)^2 +
            2*(DquadwGEE$var[6,8]*t + DquadwGEE$var[6,9]*t^2 + DquadwGEE$var[8,9]*t^3))
 }
-estim <- diff_gender[diff_gender$time%in%c(0, 0.5,0.9)&diff_gender$method%in%c("LME","JM"),]
+
+# Table of sex/gender estimates for the 4 methods, at baseline, 5 and 9 years
+estim <- diff_gender[diff_gender$time%in%c(0, 0.5,0.9)&diff_gender$method%in%c("LMM","JM"),]
 estim$pval <- sapply(estim$estim/estim$se, function(x) ifelse(x<0,pnorm(x ,0,1  ,lower.tail = T)*2, pnorm(x ,0,1  ,lower.tail = F)*2 ))
 estim
-
-### Plots
-library(ggplot2)
-library(gridExtra)
-
-xlim <- c(min(diff_gender$estim-diff_gender$se),max(diff_gender$estim+diff_gender$se))
-
-for(t in times_pred){
-  
-  p <- ggplot(diff_gender[diff_gender$time==t,], aes(estim,  as.factor(method)))+
-    ylab("Estimates") + xlab(paste("t =",t,sep=""))
-  
-  limits_low <- aes(y = as.factor(method), yend = as.factor(method), x = estim - 1.96*se, xend = estim + 1.96*se)
-  
-  p <- p + geom_point() + 
-    geom_segment(data=diff_gender[diff_gender$time==t,], limits_low, width=0.2)+
-    xlim(xlim)
-  p <- p + geom_vline(xintercept= 0, linetype="dashed", color="blue", size=1.2) 
-  
-  if(t==times_pred[1]){
-    p1 <- p
-    p2 <- ggplot(diff_gender[diff_gender$time==t,], aes(estim,  as.factor(method)))
-    p3 <- p2 
-    p4 <- p2
-  }else if(t==times_pred[2]){
-    p2 <- p
-  }else if(t==times_pred[3]){
-    p3 <- p
-  }else{
-    p4 <- p
-  }
-}
-
-pdf(file=paste("Estimates_",dataset,"_",outcome,"2.pdf",sep=""),height = 7,width=5)
-grid.arrange(p1, p2, p3, p4, ncol = 1)
-dev.off()
 
 
 ### Cumulative transition intensities for dropout and death ----
@@ -603,51 +567,13 @@ msf1 <- msfit(c1, trans=trans)
 pt0 <- probtrans(msf0, predt=0)[[1]]
 pt1 <- probtrans(msf1, predt=0)[[1]]
 
-par(mfrow=c(1,2))
-plot(msf0$Haz$Haz[msf0$Haz$trans==1]~msf0$Haz$time[msf0$Haz$trans==1],type='l',
-     ylab="Cumulative Hazard - Dropout", xlab="Time", ylim=c(min(msf0$Haz$Haz), max(msf0$Haz$Haz)))
-lines(msf1$Haz$Haz[msf1$Haz$trans==1]~msf1$Haz$time[msf1$Haz$trans==1],lty=2)
-legend("topleft",c("Female","Male"), lty=c(1,2))
-
-plot(msf0$Haz$Haz[msf0$Haz$trans==2]~msf0$Haz$time[msf0$Haz$trans==2],type='l',
-     ylab="Cumulative Hazard - Death", xlab="Time", ylim=c(min(msf0$Haz$Haz), max(msf0$Haz$Haz)))
-lines(msf1$Haz$Haz[msf1$Haz$trans==2]~msf1$Haz$time[msf1$Haz$trans==2],lty=2)
-legend("topleft",c("Female","Male"), lty=c(1,2))
-
-
-pdf(file=paste("Aalen-Johansen_plots",dataset,"_",outcome,".pdf",sep=""),height = 3,width=7)
-par(mfrow=c(1,3))
-plot(pt0$time, pt0$pstate1, type="s", lwd=2,  ylim=c(0,1), col='purple3',
-     xlab="Time", ylab="Probability")
-lines(pt1$time, pt1$pstate1, type="s", lwd=2, lty=3, col='green3')
-legend("topright", c("Female", "Male"), lwd=2, lty=c(1,3), col=c('purple3', 'green3'), bty="n")
-title(main="Aalen-Johansen \n Leave Health state")
-
-plot(pt0$time, pt0$pstate2, type="s", lwd=2, ylim=c(0,1), col='purple3',
-     xlab="Time", ylab="Probability")
-lines(pt1$time, pt1$pstate2, type="s", lwd=2, lty=3, col='green3')
-legend("topright", c("Female", "Male"), lwd=2, lty=c(1,3),  col=c('purple3', 'green3'), bty="n")
-title(main="Aalen-Johansen \n Dropout")
-
-plot(pt0$time, pt0$pstate3, type="s", lwd=2, ylim=c(0,1), col='purple3',
-     xlab="Time", ylab="Probability")
-lines(pt1$time, pt1$pstate3, type="s", lwd=2, lty=3, col='green3')
-legend("topright", c("Female", "Male"), lwd=2, lty=c(1,3),  col=c('purple3', 'green3'), bty="n")
-title(main="Aalen-Johansen \n Death")
-dev.off()
-
-save(DquadGEE, JM_D_both, JM_D_level, DquadHLME, DsplHLME, DquadLME, DquadwGEE, dataS, dataJM, 
-     Pfemale, Pmale, JMPfemale, JMPmale, predGEEfemale, predGEEmale, predwGEEfemale, predwGEEmale, datanew, 
-     #PSfemale, PSmale, 
-     maxtime, pt0, pt1,
-     file=paste("models_JM_LMM_GEE_wGEE_",dataset,"_",outcome,".RData",sep=""))
-
-
-
 
 ### Final plot ----
-outcome <- "Verbal Fluency - Fruits"
-dataset <- "Paquid"
+library(ggplot2)
+library(gridExtra)
+library(dplyr)
+library(patchwork)
+
 traj_plot <- data.frame("Pfemale"=Pfemale$pred[,1], "Pfemale_inf"=Pfemale$pred[,2],"Pfemale_sup"=Pfemale$pred[,3],
                         "times"=datanew$time,
                         "Pmale"=Pmale$pred[,1], "Pmale_inf"=Pmale$pred[,2],"Pmale_sup"=Pmale$pred[,3],
@@ -682,7 +608,7 @@ traj_plot_melted_IC$method <- as.factor(as.character(forcats::fct_recode(traj_pl
                                                                          sup = "Pfemale_sup", 
                                                                          sup = "Pmale_sup")
 ))
-library(dplyr)
+
 traj_plot_melted_IC <- full_join(
   traj_plot_melted_IC %>% 
     filter(method=="inf") %>% 
@@ -695,21 +621,19 @@ traj_plot_melted_IC <- full_join(
   by = c("times", "sex")
 )
 
-library(ggplot2)
+
 p_traj <- ggplot(traj_plot_melted_pointestimate, aes(x=times)) +
   geom_ribbon(data = traj_plot_melted_IC,
               aes(ymin = inf, ymax = sup, fill=sex), alpha = 0.2) + 
   geom_line(aes(y=outcome, linetype=method, color=sex), size = 1) +
   scale_color_manual(values = c("purple3", "green3")) + 
   scale_fill_manual(values = c("purple3", "green3")) +
-  #scale_x_discrete() + 
   scale_linetype_manual(values = c("twodash", "dotted","solid","dashed")) + 
   theme_bw() +
   theme(plot.title = element_text(size=15, face = "bold", hjust = 0.5)) +
   ylab(paste(outcome, " in ", dataset, sep="")) + xlab("Time in decades") +
-  #ggtitle(paste(outcome," in ",dataset, " by gender (for age0=75,EL=0)",sep='')) +
-  NULL
-p_traj
+  
+  p_traj
 
 p_estimates <- grid.arrange(p1, p2, p3, p4, ncol = 1)
 
@@ -739,178 +663,26 @@ p_Johansen_DO <- ggplot(data_Johansen_DO, aes(x=times)) +
   geom_line(aes(y=pstate, color=sex), size = 1)  + ylim(0,1) +
   scale_color_manual(values = c("purple3", "green3")) + 
   scale_fill_manual(values = c("purple3", "green3")) + 
-  #scale_x_discrete() + 
-  #scale_linetype_manual(values = c("twodash", "dotted","solid","dashed")) + 
   theme_bw() +
   theme(plot.title = element_text(size=15, face = "bold", hjust = 0.5)) +
   ylab("Dropout probability") + xlab("Time in decades") 
-#ggtitle(paste(outcome," in ",dataset, " by gender (for age0=75,EL=0)",sep=''))
-p_Johansen_DO
+
 
 p_Johansen_DC <- ggplot(data_Johansen_DC, aes(x=times)) +
   geom_ribbon(aes(ymin = pstate_low, ymax = pstate_up, fill=sex), alpha=0.3) +
   geom_line(aes(y=pstate, color=sex), size = 1)  + ylim(0,1) +
   scale_color_manual(values = c("purple3", "green3")) + 
   scale_fill_manual(values = c("purple3", "green3")) + 
-  #scale_x_discrete() + 
-  #scale_linetype_manual(values = c("twodash", "dotted","solid","dashed")) + 
   theme_bw() +
   theme(plot.title = element_text(size=15, face = "bold", hjust = 0.5)) +
   ylab("Death probability") + xlab("Time in decades") 
-#ggtitle(paste(outcome," in ",dataset, " by gender (for age0=75,EL=0)",sep=''))
-p_Johansen_DC
 
 
-#print(plotObj,vp=viewport(layout.pos.row=1:6,layout.pos.col=2))
-
-grid.arrange(p_traj, p_estimates, p_Johansen_DO, p_Johansen_DC, ncol = 2)
-
-library(patchwork)
-#p_estimates3 <- p1 +p2+ p3 + p4 + plot_layout(guides = "collect", ncol = 1)
-(p_final <-  (p_traj + # theme(legend.position = "left") +
-               p_estimates2) / (p_Johansen_DO + guides(color="none", fill="none") + p_Johansen_DC + guides(color="none", fill="none")) + 
-  patchwork::plot_layout(heights = c(2,1)))
+(p_final <-  (p_traj + 
+                p_estimates2) / (p_Johansen_DO + guides(color="none", fill="none") + p_Johansen_DC + guides(color="none", fill="none")) + 
+    patchwork::plot_layout(heights = c(2,1)))
 
 file <- paste("Plot ", outcome, " in ",dataset, ".pdf", sep="")
 pdf(file, width=9, height = 7)
 print(p_final)
 dev.off()
-
-### Description ----
-first_line <-  sapply(unique(dataJM$numero),function(x) which(dataJM$numero==x & dataJM$visit==1))
-cat("Sample size")
-(N=length(unique(dataJM$numero)))
-cat("Age range")
-summary(dataJM$age)
-cat("Mean Age baseline")
-mean(dataJM$age0[first_line])
-summary(dataJM$time)
-cat("Max followup")
-summary(dataJM$timeEvent)
-nmes1 <- sapply(unique(dataJM$numero),function(x) length(which(!is.na(dataJM$ani_15[dataJM$numero==x]))))
-summary(nmes1)
-nmes2 <- sapply(unique(dataJM$numero),function(x) length(which(!is.na(dataJM$ani_15[dataJM$numero==x]))))
-summary(nmes2) #if outcome = "srlibre", t0 enlevé pour ani_30!
-cat("mean number of visits per subject")
-summary(c(nmes1,nmes2))
-length(unique(dataJM$numero[first_line]))
-cat("Male proportion")
-table(dataJM$male[first_line])/N
-cat("High education proportion")
-table(dataJM$dipniv[first_line])[5]/N
-cat("Number deaths")
-table(dataJM$inddc25[first_line]) 
-cat("Proportion deaths - female")
-length(which(dataJM$indEvent[first_line]==2 & dataJM$male[first_line]==0))/length(which(dataJM$male[first_line]==0))
-cat("Proportion deaths - male")
-length(which(dataJM$indEvent[first_line]==2 & dataJM$male[first_line]==1))/length(which(dataJM$male[first_line]==1))
-cat("Number DO")
-table(dataJM$indEvent[first_line]) /N
-nmes<-c(table(dataJM$numero))
-length(which(nmes<max(nmes)))
-cat("Proportion DO - female")
-length(which(dataJM$indEvent[first_line]==1 & dataJM$male[first_line]==0))/length(which(dataJM$male[first_line]==0))
-cat("Proportion DO - male")
-length(which(dataJM$indEvent[first_line]==1 & dataJM$male[first_line]==1))/length(which(dataJM$male[first_line]==1))
-cat("Number dementia")
-table(dataJM$dem1_25[first_line])
-
-#by sex
-first_line <-  sapply(unique(dataJM$numero),function(x) which(dataJM$numero==x & dataJM$visit==1))
-table(dataJM$sexe[first_line])
-
-male <- dataJM$male[first_line]
-
-cat("Sample size")
-(N=length(unique(dataJM$numero)))
-cat("Age range")
-summary(dataJM$age[dataJM$male==1])
-summary(dataJM$age[dataJM$male==0])
-cat("Mean Age baseline")
-mean(dataJM$age0[first_line][which(male==1)])
-mean(dataJM$age0[first_line][which(male==0)])
-#summary(dataJM$time)
-cat("Max followup")
-summary(dataJM$timeEvent[dataJM$male==1])
-summary(dataJM$timeEvent[dataJM$male==0])
-
-# nmes1 <- sapply(unique(dataJM$numero),function(x) length(which(!is.na(dataJM$ani_15[dataJM$numero==x]))))
-# summary(nmes1)
-# nmes2 <- sapply(unique(dataJM$numero),function(x) length(which(!is.na(dataJM$ani_15[dataJM$numero==x]))))
-# summary(nmes2) #if outcome = "srlibre", t0 enlevé pour ani_30!
-cat("mean number of visits per subject")
-summary(nmes[male==1])
-summary(nmes[male==0])
-
-length(unique(dataJM$numero[first_line]))
-cat("Male proportion")
-table(dataJM$male[first_line])/N
-cat("High education proportion")
-table(dataJM$dipniv[first_line])[5]/length(male)
-table(dataJM$dipniv[first_line][male==1])[5]/length(male==1)
-table(dataJM$dipniv[first_line][male==0])[5]/length(male==0)
-
-cat("Number deaths")
-table(dataJM$inddc25[first_line], male) 
-cat("Number deaths - male")
-length(which(nmes<max(nmes) & male ==1))
-cat("Number deaths - female")
-length(which(nmes<max(nmes) & male ==1))
-# cat("Proportion deaths - female")
-# length(which(dataJM$indEvent[first_line]==2 & dataJM$male[first_line]==0))/length(which(dataJM$male[first_line]==0))
-# cat("Proportion deaths - male")
-# length(which(dataJM$indEvent[first_line]==2 & dataJM$male[first_line]==1))/length(which(dataJM$male[first_line]==1))
-cat("Number DO")
-table(dataJM$indEvent[first_line]) /N
-nmes<-c(table(dataJM$numero))
-cat("Number DO - male")
-length(which(nmes<max(nmes) & male ==1))
-cat("Number DO - female")
-length(which(nmes<max(nmes) & male ==0))
-cat("Number Dementia - male")
-table(dataJM$dem1_25[first_line][which(male==1)])
-cat("Number Dementia - female")
-table(dataJM$dem1_25[first_line][which(male==0)])
-
-summary(dataJM$varY[dataJM$visit==1])
-mean(dataJM$varY[dataJM$visit==1])
-sqrt(var(dataJM$varY[dataJM$visit==1]))
-summary(dataJM$varY)
-# cat("Proportion DO - female")
-# length(which(dataJM$indEvent[first_line]==1 & dataJM$male[first_line]==0))/length(which(dataJM$male[first_line]==0))
-# cat("Proportion DO - male")
-# length(which(dataJM$indEvent[first_line]==1 & dataJM$male[first_line]==1))/length(which(dataJM$male[first_line]==1))
-
-
-
-
-traj_plot_melted_pointestimate$outcome[traj_plot_melted_pointestimate$method=="GEE" & traj_plot_melted_pointestimate$sex=='female'&traj_plot_melted_pointestimate$times==0]
-
-traj_plot_melted_pointestimate$outcome[traj_plot_melted_pointestimate$method=="GEE" & traj_plot_melted_pointestimate$sex=='male'&traj_plot_melted_pointestimate$times==0]
-
-max(data_Johansen_DO$pstate[data_Johansen_DO$sex=='Male'])
-max(data_Johansen_DO$pstate[data_Johansen_DO$sex=='Female'])
-
-max(data_Johansen_DC$pstate[data_Johansen_DC$sex=='Male'])
-max(data_Johansen_DC$pstate[data_Johansen_DC$sex=='Female'])
-
-
-#check dipniv
-# 1 = pas de scolarité ou niveau primaire non validé
-# 2 = niveau primaire validé ou secondaire court non validé
-# 3 = niveau secondaire court validé ou secondaire long non validé
-# 4 = niveau secondaire long validé ou supérieur non validé
-# 5 = enseignement supérieur validé
-
-firstline_dataJM <-  sapply(unique(dataJM$numero),function(x) which(dataJM$numero==x & dataJM$visit==1))
-data <-data[order(data$numero,data$time),]
-firstline_data<-  sapply(unique(data$numero),function(x) which(data$numero==x)[1])
-
-firstline_data_inJM <- firstline_data[which(data$numero[firstline_data]%in%dataJM$numero[firstline_dataJM])]
-which(!data$numero[firstline_data_inJM]%in%dataJM$numero[firstline_dataJM])
-
-
-table(dataJM$educ1[firstline_dataJM])
-table(data$dipniv[firstline_data_inJM])
-
-165/sum(table(data$dipniv[firstline_data_inJM]))
